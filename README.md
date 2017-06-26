@@ -1,1 +1,1 @@
-These are the primary scripts I've bene working with, but the saved models/data/etc are not in the repository because they're too large. So these scripts won't actually work if you try to run them on your machine.
+These are the primary scripts I've been working with, but the saved models/data/etc are not in the repository because they're too large. So these scripts won't actually work if you try to run them on your machine.
