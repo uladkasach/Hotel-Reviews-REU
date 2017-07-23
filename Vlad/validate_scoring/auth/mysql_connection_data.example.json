@@ -1,0 +1,6 @@
+{
+  "host"     : "example.org",
+  "user"     : "username",
+  "password" : "secret",
+  "database" : "my_db"
+}
