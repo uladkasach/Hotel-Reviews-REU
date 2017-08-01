@@ -16,12 +16,13 @@ def derive(review):
     ## get internal db id from ext db id
     ext_id = review["database_id"];
     print("Running " + ext_id);
-    sql = "SELECT ReviewID FROM reviews WHERE ExtID ='%s'";
+    sql = "SELECT ReviewID, Score FROM reviews WHERE ExtID ='%s'";
     cur.execute(sql % ext_id)
     internal_id = None;
     for row in cur:
         ##print(row)
         internal_id = row["ReviewID"];
+        overall_score = row["Score"];
     if(internal_id is None):
         print ("   `-> review not found (ext_id = " + ext_id + ")");
         return False;
@@ -78,10 +79,10 @@ def derive(review):
     #############
     
     ## define data labels: ext_review_id, label_location, label_service, label_price, f_1,1 through f_3,3 
-    header_array = ["ext_review_id", "label_location", "label_service", "label_price", "location_neg", "location_neu", "location_pos", "service_neg", "service_neu", "service_pos", "price_neg", "price_neu", "price_pos"];
+    header_array = ["ext_review_id", "label_overall", "label_location", "label_service", "label_price", "location_neg", "location_neu", "location_pos", "service_neg", "service_neu", "service_pos", "price_neg", "price_neu", "price_pos"];
     
     ## define this derived data
-    values = [ext_id, mapped_user_ratings["location"], mapped_user_ratings["service"], mapped_user_ratings["price"], extracted_ratings["location_neg"], extracted_ratings["location_neu"], extracted_ratings["location_pos"], extracted_ratings["service_neg"], extracted_ratings["service_neu"], extracted_ratings["service_pos"], extracted_ratings["price_neg"], extracted_ratings["price_neu"], extracted_ratings["price_pos"]];
+    values = [ext_id, overall_score, mapped_user_ratings["location"], mapped_user_ratings["service"], mapped_user_ratings["price"], extracted_ratings["location_neg"], extracted_ratings["location_neu"], extracted_ratings["location_pos"], extracted_ratings["service_neg"], extracted_ratings["service_neu"], extracted_ratings["service_pos"], extracted_ratings["price_neg"], extracted_ratings["price_neu"], extracted_ratings["price_pos"]];
     
     ## to string
     csv_header_string = ", ".join(header_array);
