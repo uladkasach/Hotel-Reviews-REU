@@ -4,8 +4,12 @@ import os;
 import multiprocessing as mp;
 import sys;
 
+input_mod = sys.argv[1];
+bool_extend = False;
+if(len(sys.argv) > 2 and sys.argv[2] == "--extend"): bool_extend = True;
+
 results_file = "results/derived_training_data.csv";
-input_file = 'input/aspect_dictionary_1000.pkl'
+input_file = 'input/'+input_mod+'.pkl'
 
 ## derive the features and record them to file
 def derive_and_record(document):
@@ -27,7 +31,9 @@ if __name__ == '__main__':
 
 
     ## write header and refresh the file
-    with open(results_file, 'w+') as the_file:
+    open_type = "w+";
+    if(bool_extend): open_type = "a+"; # a+ does not truncate the file to size 0 before starting
+    with open(results_file, open_type) as the_file:
         result = derive_features_and_labels.derive(docs[0]);
         header = result[0];
         data = result[1];

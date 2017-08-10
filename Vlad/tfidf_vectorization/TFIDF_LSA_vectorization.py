@@ -29,7 +29,7 @@ document_count = i;
 ## Compute BOW (term frequency matrix)
 #################################################################
 print("Starting sklearn BOW counting...")
-count_vectorizer = CountVectorizer(min_df=0.01)
+count_vectorizer = CountVectorizer(min_df=0.0000001) # 0.01 -> 1106 words, 0.000001 -> 41588, ~130000, 0.0000001 -> 
 count_vectorizer.fit_transform(document_set)
 #print "Vocabulary:", count_vectorizer.vocabulary_
 vocabulary = count_vectorizer.vocabulary_;
@@ -120,11 +120,11 @@ vector_count = tf_idf_matrix.shape[1];
 with open(output_file_path, "w+") as f:
     for i in range(vector_count):
         ##print("Now grabbing vector " + str(i))
-        this_vector = tf_idf_matrix[:, i].toarray();
+        this_vector = lsa[:, i];
         this_vector_as_string = " ".join([str(float(value)) for value in this_vector])
         this_word = reverse_dictionary[i];
         output_line = this_word + " " + this_vector_as_string;
-        if(i % 200 == 0): print("word at " + str(i) + " = " + this_word);
-        f.write(output_line+"\n");
+        if(i % 200 == 0): print("word at " + str(i) + " = " + this_word + ", dim = " + str(len(this_vector)));
+        f.write(output_line.encode('ascii', 'ignore').decode('ascii')+"\n");
         
 print("All done!");
