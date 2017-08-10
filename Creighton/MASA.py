@@ -1,11 +1,9 @@
 from gensim.models.word2vec import Word2Vec
 from gensim.models.keyedvectors import KeyedVectors
-from gensim.parsing.porter import PorterStemmer
 from nltk.corpus import stopwords
 import numpy as np
 import pickle
 from sklearn.cluster import KMeans
-import math
 import operator
 from os import system
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
@@ -20,6 +18,7 @@ class MASA(object):
 	def __init__(self,
 		aspects = [],
 		aspect_dictionary_file = None,
+		aspect_file_mapping = None,
 		clustered_words_file = None,
 		seeds_adjacency_file = None,
 		seed_word_files = [],
@@ -31,8 +30,11 @@ class MASA(object):
 
 		object.__init__(self)
 
-		#aspects topics
+		#set the aspects
 		self.set_aspects(aspects)
+
+		#set the aspect file mapping
+		self.set_aspect_file_mapping(aspect_file_mapping)
 
 		#load the aspect dictionary
 		self.load_aspect_dictionary(aspect_dictionary_file)
@@ -86,10 +88,6 @@ class MASA(object):
 	def get_clustered_words(self):
 		return self.__clustered_words
 
-	#get the aspects list
-	def get_aspects(self):
-		return self.__aspects
-
 	#get seed word files
 	def get_seed_word_files(self):
 		return self.__seed_word_files
@@ -97,6 +95,14 @@ class MASA(object):
 	#get aspect dicitonary
 	def get_aspect_dictionary(self):
 		return self.__aspect_dictionary
+
+	#get the aspects
+	def get_aspects(self):
+		return self.__aspects
+
+	#get the aspect file mapping
+	def get_aspect_file_mapping(self):
+		return self.__aspect_file_mapping
 
 	#############
 	#End getters#
@@ -214,13 +220,22 @@ class MASA(object):
 
 	#set the aspects
 	def set_aspects(self, aspects = []):
-		
+
+		if type(aspects) != type(list()):
+			raise Exception('Aspects must be submitted as a python list')
+
 		if len(aspects) < 1:
 			self.__aspects = None
-		elif type(aspects) != type(list()):
-			raise Exception('Aspects must be a list')
-		
-		self.__aspects = aspects
+		else:
+			self.__aspects = aspects
+
+	#set the aspect file mapping
+	def set_aspect_file_mapping(self, aspect_file_mapping = None):
+
+		if aspect_file_mapping != None and type(aspect_file_mapping) != type(dict()):
+			raise Exception('Aspect file mapping must be a python dictionary.')
+
+		self.__aspect_file_mapping = aspect_file_mapping
 
 	#set the raw text file
 	def set_raw_text(self, file = None):
@@ -241,16 +256,17 @@ class MASA(object):
 	#set the seed word files
 	def set_seed_word_files(self, files = []):
 
-		if len(files) < 1:
-			self.__seed_word_files = None
+		if type(files) != type(list()):
+			raise Exception('Filenames must be submitted as a python list')
 		elif type(files) == type(list()):
 			for file in files:
 				if not os.path.isfile(file):
 					raise FileNotFoundError('File "{}" not found'.format(file))
+
+		if len(files) < 1:
+			self.__seed_word_files = None
 		else:
-			raise Exception('Seed word files must be submitted as a python list')
-		
-		self.__seed_word_files = files
+			self.__seed_word_files = files
 
 	#########################
 	#End Loaders amd Setters#
@@ -266,10 +282,12 @@ class MASA(object):
 		if out[-4:] != '.pkl':
 			raise Exception('File name provided must be a .pkl file')
 		elif self.__aspect_dictionary == None:
-			raise Exception('No aspect dictionary in memory to save! Run "load_aspect_dictionary" first.')
+			raise Exception('No aspect dictionary in memory to save! Run "load_aspect_dictionary" or "build_aspect_dictionary" first.')
 		
 		with open(out, 'wb') as f:
 			pickle.dump(self.__aspect_dictionary, f, pickle.HIGHEST_PROTOCOL)
+		
+		print('Saved aspect dictionary')
 
 	#save the clustered words 
 	def save_clustered_words(self, out = 'KMeans/clustered_words.pkl'):
@@ -281,6 +299,28 @@ class MASA(object):
 
 		with open(out, 'wb') as f:
 			pickle.dump(self.__clustered_words, f, pickle.HIGHEST_PROTOCOL)
+
+	#save the top n scored documents
+	def save_top_documents(self, n = 5, out = 'top_docs.txt', dataset = None):
+
+		if self.__aspect_dictionary == None:
+			raise Exception('No aspect dictionary in memory. Run "load_aspect_dictionary" or "build_aspect_dictionary" first.')
+		elif dataset == None or dataset != None and not os.path.isfile(dataset):
+			raise FileNotFoundError('Dataset file not found')
+
+		#get the ids of the top n documents
+		ids = [ item[0] for item in sorted([ (doc['doc_id'], doc['score']) for doc in self.__aspect_dictionary ], key = operator.itemgetter(1), reverse = True)[:n] ]
+
+		#reads the documents into memory and gets the appropriate ones
+		with codecs.open(dataset, 'r', encoding = 'utf-8', errors = 'ignore') as f:
+			lines = [ line.strip() for line in f ]
+
+		#output the top docs to file
+		with open(out, 'w') as f:
+			for i in ids:
+				f.write('{}\n\n'.format(lines[i]))
+
+		print('Saved top {} documents'.format(n))
 
 	#save word vectors
 	def save_wv(self, out = 'Word_Vectors/wv'):
@@ -342,7 +382,7 @@ class MASA(object):
 		print('KMeans fitted in {} minutes.'.format( int( (t2 - t1) / 60 ) ))
 
 		#save if user requests it
-		if os.path.isfile(out):
+		if out != None and os.path.isfile(out):
 
 			if out[-4:] == '.pkl':
 				with open(out, 'wb') as f:
@@ -412,6 +452,115 @@ class MASA(object):
 	#################
 	#Begin Utilities#
 	#################
+
+	#build the aspect dictionary
+	def build_aspect_dictionary(self, out = None, start_index = 0, dataset = None, lines_to_read = 100):
+
+		if dataset == None or dataset != None and not os.path.isfile(dataset):
+			raise FileNotFoundError('Dataset file not found')
+		elif self.__aspects == None:
+			raise Exception('Must have aspects in order to build dictionary. Run "set_aspects" first.')
+		elif self.__clustered_words == None:
+			raise Exception('Must have clustered words in memory. Run "load_clustered_words" first.')
+		elif self.__seed_word_files == None:
+			raise Exception('Must have list of seed word files. Run "set_seed_word_files" first.')
+		elif self.__aspect_file_mapping == None:
+			raise Exception('Must provide a mapping between an aspect and the file that contains its seed words. ie: path/to/file --> aspect. Run "set_aspect_file_mapping" first.')
+		elif self.__wv == None:
+			raise Exception('The word vectors must be in memory. Run "load_wv" first.')
+		elif out != None and out[-4:] != '.pkl':
+			raise Exception('Output must be a .pkl file.')
+
+		#this will hold the mean vectors for each cluster containing an aspect
+		aspect_means = { aspect: [] for aspect in self.__aspects }
+
+		print('Finding aspect clusters...', end = '', flush = True)
+
+		#this goes through each seed word file for each aspect and
+		#adds the mean vector for each identified cluster to the
+		#aspect_means dictionary
+		for filename in self.__seed_word_files:
+			with open(filename, 'r') as f:
+
+				#each aspect's seed word in a set
+				temp = set([ line.strip() for line in f ])
+
+				#check every cluster
+				for clstr in self.__clustered_words:
+
+					clstr_set = set(clstr)
+
+					#if any seed words are in the cluster, then get
+					#the mean vector of that cluster
+					if len(clstr_set & temp) > 0 and self.similarity(np.mean([ self.__wv[word] for word in temp & clstr_set ], axis = 0), np.mean([ self.__wv[word] for word in clstr_set ], axis = 0)) > 0:
+						aspect_means[ self.__aspect_file_mapping[filename] ].append(np.mean([ self.__wv[word] for word in clstr_set ], axis = 0))
+
+		print('done')
+
+		#stuff for dictionary creation loop
+		self.__aspect_dictionary = []
+		analyzer = SentimentIntensityAnalyzer()
+		regex = re.compile(r'[^a-zA-Z0-9\s.!?]|[\_\^\`\[\]\\]', re.IGNORECASE)
+		splitregex = re.compile(r'[.|?|!]', re.IGNORECASE)
+
+		print('Building aspect dictionary on first {} lines...'.format(lines_to_read), end = '', flush = True)
+
+		t1 = time.time()
+
+		#start building the dictionary
+		with codecs.open(dataset, 'r', encoding = 'utf-8', errors = 'ignore') as f:
+
+			for doc_id, line in enumerate(f):
+
+				#remove non-alphanumeric symbols
+				line = regex.sub(' ', line.lower().strip())
+				
+				#get words in the document
+				words = line.split(' ')
+
+				#extract the lines before the start index separately
+				tag, line = ' '.join(words[:start_index]), ' '.join([ word for word in words[start_index:] if self.__wv.__contains__(word) ])
+				
+				#if no tag, then say so
+				if start_index == 0:
+					tag = 'no_tag'
+
+				#split into sentences
+				sentences = [ sentence.strip() for sentence in splitregex.split(line) ]
+
+				#remove empty sentences
+				sentences = [ sentence for sentence in sentences if sentence != '' ]
+
+				#add the review to the aspect dictionary
+				if len(sentences) > 0:
+
+					self.__aspect_dictionary.append({
+						'tag': tag,
+						'doc_id': doc_id,
+						'score': 'unscored',
+						'data': [{
+							'doc_id': doc_id,
+							'sentence': sentence,
+							'sentiment': analyzer.polarity_scores(sentence),
+							'aspect': [(
+								aspect,
+								max([ self.similarity(np.mean([ self.__wv[word] for word in sentence.split(' ') ], axis = 0), clstr_mean) for clstr_mean in aspect_means[aspect] ])
+							) for aspect in self.__aspects ]
+						} for sentence in sentences ]
+					})
+
+				if doc_id >= lines_to_read:
+					break
+
+		print('done')
+
+		t2 = time.time()
+
+		print('Dictionary built in {:.2f} minutes'.format( (t2 - t1) / 60 ))
+
+		#save if requested
+		if out != None:
+			self.save_aspect_dictionary(out)
 
 	#clean the raw text file 
 	def clean(self, stopfile = None, startindex = 0):
@@ -508,6 +657,8 @@ class MASA(object):
 			raise Exception('Need adjacency list to retrofit.')
 		elif self.__wv == None:
 			raise Exception('Need the word vector object in memory')
+		elif out == None:
+			raise Exception('Must provide an output file.')
 
 		with open('temp.txt', 'w') as f:
 			for word in self.__wv.vocab:
@@ -521,13 +672,13 @@ class MASA(object):
 
 		t2 = time.time()
 
-		print('Retrofit finished in {:.4f} minutes.'.format( (t2 - t1) / 60 ))
+		print('Retrofit finished in {:.2f} minutes.'.format( (t2 - t1) / 60 ))
 
 		system('rm temp.txt')
 
 		#read retrofitted vectors into memory
 		with open(out, 'r') as f:
-			lines = [ line.rstrip() for line in f.readlines() ]
+			lines = [ line.strip() for line in f ]
 
 		#add the header back to the file
 		with open(out, 'w') as f:
@@ -535,8 +686,43 @@ class MASA(object):
 			for line in lines:
 				f.write('{}\n'.format(line))
 
+		#update the word vectors object
+		print('Updated the word vectors.')
+		self.load_wv(file = out, w2v_format_text = True)
+
+	#score the documents in the aspect dictionary
+	def score_aspect_dictionary(self, strength_of_presence = 0.5):
+
+		if self.__aspect_dictionary == None:
+			raise Exception('No aspect dictionary in memory. Run either "load_aspect_dictionary" or "build_aspect_dictionary" first.')
+		elif self.__aspect_dictionary[0]['data'][0]['aspect'][0][0] not in self.__aspects:
+			raise Exception('Aspects saved in memory do not match those saved in the dictionary.')
+
+		print('Scoring aspect dictionary...', end = '', flush = True)
+
+		#go through every doc in the dictionary
+		for doc in self.__aspect_dictionary:
+
+			#count of aspects present in review
+			asp_cnt = { aspect: 0 for aspect in self.__aspects }
+
+			#go through every sentence
+			for data in doc['data']:
+
+				#go through every aspect
+				for asp_data in data['aspect']:
+
+					#only count aspects whose presence is stronger than provided value
+					if asp_data[1] > strength_of_presence:
+						asp_cnt[ asp_data[0] ] += 1
+
+			#add the score
+			doc['score'] = sum([ abs(snt['sentiment']['compound']) for snt in doc['data'] ]) + sum([asp_cnt[aspect] for aspect in self.__aspects ])
+
+		print('done')
+
 	#score varous kmeans
-	def score_kmeans_range(self, ks = list(range(100, 1100, 100)), workers = 1, out = 'kscores.txt'):
+	def score_kmeans_range(self, ks = list(range(100, 1100, 100)), workers = 1, out = 'kscores.txt', save_word_injection = ''):
 
 		if type(ks) != type(list()):
 			raise Exception('Must provide a python list of k values')
@@ -544,7 +730,7 @@ class MASA(object):
 			raise Exception('Must have a data matrix to score')
 		elif self.__seed_word_files == None:
 			raise Exception('Must have files containing aspect seed words. Run "set_seed_word_files" first.')
-
+		
 		#This run's setup
 		with open(out, 'a') as f:
 			f.write('Word2Vec Dimensions: {}\n'.format(len(self.__wv[ list(self.__wv.vocab.keys())[0] ])))
@@ -553,10 +739,10 @@ class MASA(object):
 		for k in ks:
 
 			#train a kmeans
-			self.train_kmeans(k = k, workers = workers, out = 'KMeans/kmeans_{}.pkl'.format(k))
+			self.train_kmeans(k = k, workers = workers, out = 'KMeans/kmeans_{}{}.pkl'.format(k, save_word_injection))
 			
 			#save the clustered words
-			self.save_clustered_words(out = 'KMeans/clustered_words_{}.pkl'.format(k))
+			self.save_clustered_words(out = 'KMeans/clustered_words_{}{}.pkl'.format(k, save_word_injection))
 
 			#score for this k
 			kscore = 0.0
@@ -578,7 +764,7 @@ class MASA(object):
 						temp = set([ line.rstrip() for line in f ])
 
 						#don't worry about clusters that don't ahve any aspect seed words
-						if len(temp & cluster_set) > 0:
+						if len(temp & cluster_set) > 0 and self.similarity(np.mean([ self.__wv[word] for word in temp & cluster_set ], axis = 0), np.mean([ self.__wv[word] for word in cluster_set ], axis = 0)) > 0:
 							clusterscore += self.similarity(np.mean([ self.__wv[word] for word in temp & cluster_set ], axis = 0), np.mean([ self.__wv[word] for word in cluster_set ], axis = 0))
 							numaspects += 1
 
@@ -655,34 +841,43 @@ class MASA(object):
 
 if __name__ == '__main__':
 
-	
+	masa = MASA(
+		raw_text = 'Train_Data/reviews_cleaned.txt',
+		aspects = ['amenities', 'service', 'location', 'price'],
+		seed_word_files = ['Seeds/amenities.txt', 'Seeds/service.txt', 'Seeds/location.txt', 'Seeds/price.txt'],
+		seeds_adjacency_file = 'Seeds/seeds.txt',
+		aspect_file_mapping = {'Seeds/amenities.txt': 'amenities', 'Seeds/service.txt': 'service', 'Seeds/location.txt': 'location', 'Seeds/price.txt': 'price'},
+		wv_file = 'Word_Vectors/wv_100_default',
+		clustered_words_file = 'KMeans/clustered_words_1000k_100dim_default.pkl'
+	)
 
+	masa.build_aspect_dictionary(dataset = 'Train_Data/reviews.txt', start_index = 2, lines_to_read = 10000)
+	masa.score_aspect_dictionary(strength_of_presence = 0.4)
+	masa.save_aspect_dictionary(out = 'Aspect_Dictionary/aspect_dictionary_1000k_100dim_default.pkl')
+	masa.save_top_documents(dataset = 'Train_Data/reviews.txt')
+	
 	"""
 	#default vector scoring
 	for n_dim in range(100, 600, 100):
 	
 		masa = MASA(raw_text = 'Train_Data/reviews_cleaned.txt', seed_word_files = ['Seeds/amenities.txt', 'Seeds/location.txt', 'Seeds/service.txt', 'Seeds/price.txt' ])
-		masa.train_word2vec(workers = 4, dimensions = n_dim, w2v_path = 'Model/w2v_{}'.format(n_dim))
-		masa.save_wv(out = 'Word_Vectors/wv_{}'.format(n_dim))
-		masa.save_wv_matrix(out = 'Pre_Clustering/wv_master_{}.txt'.format(n_dim))
-		masa.load_wv_matrix('Pre_Clustering/wv_master_{}.txt'.format(n_dim))
-		masa.score_kmeans_range(workers = 4)
+		masa.train_word2vec(workers = 4, dimensions = n_dim)
+		masa.save_wv(out = 'Word_Vectors/wv_{}_default'.format(n_dim))
+		masa.save_wv_matrix(out = 'Pre_Clustering/wv_master_{}_default.txt'.format(n_dim))
+		masa.load_wv_matrix('Pre_Clustering/wv_master_{}_default.txt'.format(n_dim))
+		masa.score_kmeans_range(out = 'kscores.txt')
 
 	#new section
 	with open('kscores.txt', 'a') as f:
-		f.write('Begin retrofitted vectors')
-		f.write('-------------------------')
+		f.write('Begin retrofitted vectors\n')
+		f.write('-------------------------\n')
 
 	#retrofitted vector scoring
 	for n_dim in range(100, 600, 100):
 
-		masa = MASA(wv_file = 'Word_Vectors/wv_{}'.format(n_dim), seeds_adjacency_file = 'Seeds/seeds.txt', seed_word_files = ['Seeds/amenities.txt', 'Seeds/location.txt', 'Seeds/service.txt', 'Seeds/price.txt' ])
-		masa.retrofit(out = 'Pre_Clustering/retro_wv_master_{}.txt'.format(n_dim), iterations = 10000)
-		masa.load_wv_matrix(file = 'Pre_Clustering/retro_wv_master_{}.txt'.format(n_dim))
-		masa.score_kmeans_range(workers = 4)
+		masa = MASA(wv_file = 'Word_Vectors/wv_{}_default'.format(n_dim), seeds_adjacency_file = 'Seeds/seeds.txt', seed_word_files = ['Seeds/amenities.txt', 'Seeds/location.txt', 'Seeds/service.txt', 'Seeds/price.txt' ])
+		masa.retrofit(out = 'Pre_Clustering/wv_master_{}_retro.txt'.format(n_dim), iterations = 10000)
+		masa.save_wv(out = 'Word_Vectors/wv_{}_retro'.format(n_dim))
+		masa.load_wv_matrix(file = 'Pre_Clustering/wv_master_{}_retro.txt'.format(n_dim))
+		masa.score_kmeans_range(workers = 4, save_word_injection = 'k_{}dim_retro'.format(n_dim))
 	"""
-
-"""
-Add: 
-	dictionary creation logic
-"""
