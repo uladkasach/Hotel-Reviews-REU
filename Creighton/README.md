@@ -13,14 +13,15 @@
 <h2>Word Vectors</h2>
 <p>Gensim's built in KeyedVectors object is very useful. You can load ones you've saved from a previous word2vec training or ones you have from elsewhere by using the "load_wv" method. The format for vector's supplied from elsewhere should be:
 <br>
-	&#9;vector_count vector_dimensions<br>
-	&#9;word vector_values
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;vector_count vector_dimensions<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;word vector_values
 </p>
 
 <p>Example:<br>
-	&#9;2 3<br>
-	&#9;dog 0.4 2.0 0.9<br>
-	&#9;cat 4.0 0.4 1.4
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2 3<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;dog 0.4 2.0 0.9<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;cat 4.0 0.4 1.4
 </p>
 
 
