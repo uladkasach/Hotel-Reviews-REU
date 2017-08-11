@@ -17,9 +17,9 @@
 	word vector_values
 </p>
 
-<p>Example:
-	2 3
-	dog 0.4 2.0 0.9
+<p>Example:<br>
+	2 3<br>
+	dog 0.4 2.0 0.9<br>
 	cat 4.0 0.4 1.4
 </p>
 
