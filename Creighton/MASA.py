@@ -11,6 +11,8 @@ import re
 import codecs
 import time
 import os.path
+from math import cos, pi, log
+import matplotlib.pyplot as plt
 
 class MASA(object):
 
@@ -170,9 +172,13 @@ class MASA(object):
 
 			#load in proper format
 			if w2v_format_binary == True:
+				print('Loading word vectors from original word2vec binary format...', end = '', flush = True)
 				self.__wv = KeyedVectors.load_word2vec_format(file, binary = True)
+				print('done')
 			elif w2v_format_text == True:
+				print('Loading word vectors from original word2vec text format...', end = '', flush = True)
 				self.__wv = KeyedVectors.load_word2vec_format(file, binary = False)
+				print('done')
 			else:
 				self.__wv = KeyedVectors.load(file)
 
@@ -492,7 +498,7 @@ class MASA(object):
 
 					#if any seed words are in the cluster, then get
 					#the mean vector of that cluster
-					if len(clstr_set & temp) > 0 and self.similarity(np.mean([ self.__wv[word] for word in temp & clstr_set ], axis = 0), np.mean([ self.__wv[word] for word in clstr_set ], axis = 0)) > 0:
+					if len(temp & clstr_set) > 0 and self.similarity(np.mean([ self.__wv[word] for word in temp & clstr_set ], axis = 0), np.mean([ self.__wv[word] for word in clstr_set ], axis = 0)) > 0:
 						aspect_means[ self.__aspect_file_mapping[filename] ].append(np.mean([ self.__wv[word] for word in clstr_set ], axis = 0))
 
 		print('done')
@@ -519,7 +525,7 @@ class MASA(object):
 				words = line.split(' ')
 
 				#extract the lines before the start index separately
-				tag, line = ' '.join(words[:start_index]), ' '.join([ word for word in words[start_index:] if self.__wv.__contains__(word) ])
+				tag, line = ' '.join(words[:start_index]), ' '.join([ word for word in words[start_index:] ])
 				
 				#if no tag, then say so
 				if start_index == 0:
@@ -527,6 +533,9 @@ class MASA(object):
 
 				#split into sentences
 				sentences = [ sentence.strip() for sentence in splitregex.split(line) ]
+
+				#remove stop words
+				sentences = [ ' '.join([ word for word in sentence.split(' ') if self.__wv.__contains__(word) ]) for sentence in sentences ]
 
 				#remove empty sentences
 				sentences = [ sentence for sentence in sentences if sentence != '' ]
@@ -650,6 +659,10 @@ class MASA(object):
 
 						o.write('\n')
 
+	#normalize word count
+	def normalize(self, x, min_x, max_x):
+		return 2 * ((x - min_x) / (max_x - min_x)) - 1
+
 	#run the retrofit program 
 	def retrofit(self, program_path = 'Retrofit/retrofit.py', out = 'Pre_Clustering/wv_master.txt', iterations = 10):
 
@@ -691,7 +704,7 @@ class MASA(object):
 		self.load_wv(file = out, w2v_format_text = True)
 
 	#score the documents in the aspect dictionary
-	def score_aspect_dictionary(self, strength_of_presence = 0.5):
+	def score_aspect_dictionary(self, strength_of_presence = 0.5, penalize_long = False):
 
 		if self.__aspect_dictionary == None:
 			raise Exception('No aspect dictionary in memory. Run either "load_aspect_dictionary" or "build_aspect_dictionary" first.')
@@ -700,14 +713,22 @@ class MASA(object):
 
 		print('Scoring aspect dictionary...', end = '', flush = True)
 
+		#keep track of word counts
+		word_counts = []
+
 		#go through every doc in the dictionary
 		for doc in self.__aspect_dictionary:
+
+			#word count of entire document
+			word_count = 0
 
 			#count of aspects present in review
 			asp_cnt = { aspect: 0 for aspect in self.__aspects }
 
 			#go through every sentence
 			for data in doc['data']:
+
+				word_count += len(data['sentence'].split(' '))
 
 				#go through every aspect
 				for asp_data in data['aspect']:
@@ -716,8 +737,19 @@ class MASA(object):
 					if asp_data[1] > strength_of_presence:
 						asp_cnt[ asp_data[0] ] += 1
 
+			#keep word counts
+			word_counts.append(word_count)
+
 			#add the score
 			doc['score'] = sum([ abs(snt['sentiment']['compound']) for snt in doc['data'] ]) + sum([asp_cnt[aspect] for aspect in self.__aspects ])
+
+		if penalize_long:
+			word_counts = [ log(wc) for wc in word_counts ]
+			mu = np.mean(word_counts)
+
+			#penalize documents too far away from the mean
+			for i, doc in enumerate(self.__aspect_dictionary):
+				doc['score'] /= abs(word_counts[i] - mu)
 
 		print('done')
 
@@ -752,7 +784,7 @@ class MASA(object):
 
 			#score the clustering
 			for clstr in self.__clustered_words:
-				cluster_set = set(clstr)
+				clstr_set = set(clstr)
 				clusterscore = 0.0
 				numaspects = 0
 
@@ -764,8 +796,8 @@ class MASA(object):
 						temp = set([ line.rstrip() for line in f ])
 
 						#don't worry about clusters that don't ahve any aspect seed words
-						if len(temp & cluster_set) > 0 and self.similarity(np.mean([ self.__wv[word] for word in temp & cluster_set ], axis = 0), np.mean([ self.__wv[word] for word in cluster_set ], axis = 0)) > 0:
-							clusterscore += self.similarity(np.mean([ self.__wv[word] for word in temp & cluster_set ], axis = 0), np.mean([ self.__wv[word] for word in cluster_set ], axis = 0))
+						if len(temp & clstr_set) > 0 and self.similarity(np.mean([ self.__wv[word] for word in temp & clstr_set ], axis = 0), np.mean([ self.__wv[word] for word in clstr_set ], axis = 0)) > 0:
+							clusterscore += self.similarity(np.mean([ self.__wv[word] for word in temp & clstr_set ], axis = 0), np.mean([ self.__wv[word] for word in clstr_set ], axis = 0))
 							numaspects += 1
 
 				#only care about clusters with aspects
@@ -838,46 +870,3 @@ class MASA(object):
 	###############
 	#End Utilities#
 	###############
-
-if __name__ == '__main__':
-
-	masa = MASA(
-		raw_text = 'Train_Data/reviews_cleaned.txt',
-		aspects = ['amenities', 'service', 'location', 'price'],
-		seed_word_files = ['Seeds/amenities.txt', 'Seeds/service.txt', 'Seeds/location.txt', 'Seeds/price.txt'],
-		seeds_adjacency_file = 'Seeds/seeds.txt',
-		aspect_file_mapping = {'Seeds/amenities.txt': 'amenities', 'Seeds/service.txt': 'service', 'Seeds/location.txt': 'location', 'Seeds/price.txt': 'price'},
-		wv_file = 'Word_Vectors/wv_100_default',
-		clustered_words_file = 'KMeans/clustered_words_1000k_100dim_default.pkl'
-	)
-
-	masa.build_aspect_dictionary(dataset = 'Train_Data/reviews.txt', start_index = 2, lines_to_read = 10000)
-	masa.score_aspect_dictionary(strength_of_presence = 0.4)
-	masa.save_aspect_dictionary(out = 'Aspect_Dictionary/aspect_dictionary_1000k_100dim_default.pkl')
-	masa.save_top_documents(dataset = 'Train_Data/reviews.txt')
-	
-	"""
-	#default vector scoring
-	for n_dim in range(100, 600, 100):
-	
-		masa = MASA(raw_text = 'Train_Data/reviews_cleaned.txt', seed_word_files = ['Seeds/amenities.txt', 'Seeds/location.txt', 'Seeds/service.txt', 'Seeds/price.txt' ])
-		masa.train_word2vec(workers = 4, dimensions = n_dim)
-		masa.save_wv(out = 'Word_Vectors/wv_{}_default'.format(n_dim))
-		masa.save_wv_matrix(out = 'Pre_Clustering/wv_master_{}_default.txt'.format(n_dim))
-		masa.load_wv_matrix('Pre_Clustering/wv_master_{}_default.txt'.format(n_dim))
-		masa.score_kmeans_range(out = 'kscores.txt')
-
-	#new section
-	with open('kscores.txt', 'a') as f:
-		f.write('Begin retrofitted vectors\n')
-		f.write('-------------------------\n')
-
-	#retrofitted vector scoring
-	for n_dim in range(100, 600, 100):
-
-		masa = MASA(wv_file = 'Word_Vectors/wv_{}_default'.format(n_dim), seeds_adjacency_file = 'Seeds/seeds.txt', seed_word_files = ['Seeds/amenities.txt', 'Seeds/location.txt', 'Seeds/service.txt', 'Seeds/price.txt' ])
-		masa.retrofit(out = 'Pre_Clustering/wv_master_{}_retro.txt'.format(n_dim), iterations = 10000)
-		masa.save_wv(out = 'Word_Vectors/wv_{}_retro'.format(n_dim))
-		masa.load_wv_matrix(file = 'Pre_Clustering/wv_master_{}_retro.txt'.format(n_dim))
-		masa.score_kmeans_range(workers = 4, save_word_injection = 'k_{}dim_retro'.format(n_dim))
-	"""
