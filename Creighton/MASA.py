@@ -1,9 +1,10 @@
 from gensim.models.word2vec import Word2Vec
 from gensim.models.keyedvectors import KeyedVectors
+from gensim.parsing.porter import PorterStemmer
 from nltk.corpus import stopwords
 import numpy as np
 import pickle
-from sklearn.cluster import KMeans
+from sklearn.cluster import MiniBatchKMeans
 import operator
 from os import system
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
@@ -11,8 +12,7 @@ import re
 import codecs
 import time
 import os.path
-from math import cos, pi, log
-import matplotlib.pyplot as plt
+from math import log
 
 class MASA(object):
 
@@ -379,7 +379,7 @@ class MASA(object):
 
 		t1 = time.time()
 
-		kmeans = KMeans(n_clusters = k, random_state = 0, n_jobs = workers).fit(self.__X[:, 1:])
+		kmeans = MiniBatchKMeans(n_clusters = k, random_state = 0, n_jobs = workers).fit(self.__X[:, 1:])
 
 		t2 = time.time()
 
@@ -572,7 +572,7 @@ class MASA(object):
 			self.save_aspect_dictionary(out)
 
 	#clean the raw text file 
-	def clean(self, stopfile = None, startindex = 0):
+	def clean(self, stopfile = None, startindex = 0, stem = False):
 
 		#need a filename
 		if self.__raw_text == None:
@@ -608,7 +608,11 @@ class MASA(object):
 					line = regex.sub(' ', line)
 
 					#split into tokens and ignore stopwords
-					tokens = [ word.lower().strip() for word in line.split(' ') if word not in stops ]
+					if stem:
+						stemmer = PorterStemmer()
+						tokens = [ stemmer.stem(word.lower().strip()) for word in line.split(' ') if word not in stops ]
+					else:
+						tokens = [ word.lower().strip() for word in line.split(' ') if word not in stops ]
 
 					#remove empty elements from the list
 					tokens = [ word for word in tokens if word != '' ]
@@ -658,10 +662,6 @@ class MASA(object):
 								o.write('{} '.format(lines[j]))
 
 						o.write('\n')
-
-	#normalize word count
-	def normalize(self, x, min_x, max_x):
-		return 2 * ((x - min_x) / (max_x - min_x)) - 1
 
 	#run the retrofit program 
 	def retrofit(self, program_path = 'Retrofit/retrofit.py', out = 'Pre_Clustering/wv_master.txt', iterations = 10):
